@@ -1,34 +1,10 @@
-import ee from 'event-emitter';
+//import ee from 'event-emitter';
+import toPairs from 'lodash';
 
-export const XHR = 'xhr';
-
-export default function xhrRequest(options) {
-  var emitter = new ee();
+export default function xhrRequest(options, listenersByEventName) {
+  //const emitter = new ee();
 
   const xhr = new XMLHttpRequest();
-  let index = 0;
-
-  function onProgressEvent() {
-    const rawChunk = xhr.responseText.substr(index);
-    index = xhr.responseText.length;
-    options.onRawChunk(rawChunk);
-  }
-
-  function onLoadEvent() {
-    options.onRawComplete({
-      statusCode: xhr.status,
-      transport: XHR,
-      raw: xhr
-    });
-  }
-
-  function onError(err) {
-    options.onRawComplete({
-      statusCode: 0,
-      transport: XHR,
-      raw: err
-    });
-  }
 
   xhr.open(options.method, options.url);
   xhr.responseType = options.responseType;
@@ -40,9 +16,13 @@ export default function xhrRequest(options) {
   if (options.credentials === 'include') {
     xhr.withCredentials = true;
   }
-  xhr.addEventListener('progress', onProgressEvent);
-  xhr.addEventListener('loadend', onLoadEvent);
-  xhr.addEventListener('error', onError);
+
+  toPairs(listenersByEventName)
+  .forEach(function(result) {
+    const eventName = result[0];
+    const listener = result[1];
+    xhr.addEventListener(eventName, listener);
+  })
   xhr.send(options.body);
 
   return xhr;
