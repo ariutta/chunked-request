@@ -1,5 +1,19 @@
+/**
+ * Root reference for iframes.
+ * Taken from https://github.com/visionmedia/superagent/blob/master/lib/client.js
+ */
+var root;
+if (typeof window !== 'undefined') { // Browser window
+  root = window;
+} else if (typeof self !== 'undefined') { // Web Worker
+  root = self;
+} else { // Other environments
+  console.warn("Using browser-only version of superagent in non-browser environment");
+  root = this;
+}
+
 import { isObject, noop } from './util';
-import defaultTransportFactory  from './defaultTransportFactory';
+import defaultTransportFactory from './defaultTransportFactory';
 import defaultChunkParser from './defaultChunkParser';
 
 // chunkedRequest will make a network request to the URL specified in `options.url`
@@ -51,7 +65,7 @@ export default function chunkedRequest(options) {
 
   let transport = options.transport;
   if (!transport) {
-    transport = chunkedRequest.transportFactory();
+    transport = chunkedRequest.transportFactory(root);
   }
 
   transport({
