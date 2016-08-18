@@ -6,7 +6,7 @@ import keys from 'lodash/keys';
 import { noop } from './util';
 import textEncoding from 'text-encoding-utf-8'; // only needed for IE9
 import union from 'lodash/union';
-import xhrRequest from './impl/baseXhr';
+import xhrRequest from './impl/xhr';
 
 let selected = null;
 let textEncoder;
@@ -56,7 +56,7 @@ if (typeof TextEncoder !== 'undefined') {
  */
 export default function defaultTransportFactory(root) {
   if (!selected) {
-    if (typeof root.fetch1 === 'function') {
+    if (typeof root.fetch === 'function') {
       // browser supports fetch, so use it
       selected = fetchRequest;
     } else {
