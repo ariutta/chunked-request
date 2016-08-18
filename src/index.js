@@ -2,13 +2,14 @@
  * Root reference for iframes.
  * Taken from https://github.com/visionmedia/superagent/blob/master/lib/client.js
  */
-var root;
+let root;
 if (typeof window !== 'undefined') { // Browser window
   root = window;
 } else if (typeof self !== 'undefined') { // Web Worker
   root = self;
 } else { // Other environments
-  console.warn("Using browser-only version of superagent in non-browser environment");
+  // TODO should we warn here?
+  //console.warn('Using browser-only version of superagent in non-browser environment');
   root = this;
 }
 

@@ -16,8 +16,9 @@
   "scripts": {
     "prepublish": "npm run clean && npm run build:lib",
     "clean": "rm -rf build/*",
+    "build:bundle": "browserify ./src/index.js -o bundle.js --standalone chunkedRequest --debug -t [ babelify ]",
     "build:integ": "mkdir -p build && browserify test/integ/*.spec.js -o build/integration-tests.js --debug -t [ babelify ]",
-    "build:lib": "mkdir -p lib && babel --out-dir lib src",
+    "build:lib": "mkdir -p lib && babel --source-maps true --out-dir lib src",
     "lint": "eslint .",
     "test": "npm run lint && npm run test:integ",
     "test:integ": "npm run build:integ && ./run-karma.sh --single-run",

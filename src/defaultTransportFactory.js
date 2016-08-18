@@ -1,27 +1,31 @@
-import defaultsDeep from 'lodash';
+import defaultsDeep from 'lodash/defaultsdeep';
 import fetchRequest from './impl/fetch';
-import find from 'lodash';
-import flow from 'lodash';
-import keys from 'lodash';
-//import textEncoding from 'text-encoding-utf-8';
-import union from 'lodash';
+import find from 'lodash/find';
+import flow from 'lodash/flow';
+import keys from 'lodash/keys';
+import { noop } from './util';
+import textEncoding from 'text-encoding-utf-8'; // only needed for IE9
+import union from 'lodash/union';
 import xhrRequest from './impl/baseXhr';
 
-function noop(x) {return x;}
-
 let selected = null;
-
-//function decode(buf) {
-//  return String.fromCharCode.apply(null, new Uint8Array(buf));
-//}
-
-function encode(str) {
-  const buf = new ArrayBuffer(str.length);
-  const bufView = new Uint8Array(buf);
-  for (let i=0, strLen=str.length; i < strLen; i++) {
-    bufView[i] = str.charCodeAt(i);
-  }
-  return buf;
+let textEncoder;
+if (typeof TextEncoder !== 'undefined') {
+  textEncoder = new TextEncoder();
+} else if (typeof Uint8Array !== 'undefined') {
+  textEncoder = {
+    encode: function(str) {
+      const buf = new ArrayBuffer(str.length);
+      const bufView = new Uint8Array(buf);
+      for (let i=0, strLen=str.length; i < strLen; i++) {
+        bufView[i] = str.charCodeAt(i);
+      }
+      return buf;
+    }
+  };
+} else {
+  // only for IE9
+  textEncoder = textEncoding;
 }
 
 /**
@@ -52,13 +56,12 @@ function encode(str) {
  */
 export default function defaultTransportFactory(root) {
   if (!selected) {
-    if (typeof root.ReadableByteStream === 'function') {
+    if (typeof root.fetch1 === 'function') {
       // browser supports fetch, so use it
       selected = fetchRequest;
     } else {
       // use XMLHttpRequest (XHR)
-
-      const defaultListeners = {
+      const binaryStreamListeners = {
         'progress': function() {
           const xhr = this;
           return xhr.response;
@@ -68,44 +71,58 @@ export default function defaultTransportFactory(root) {
       let index;
       const xhrPatches = find([{
         // streaming, binary
-        responseType: 'moz-chunked-arraybuffer',
-        transport: 'MOZ_CHUNKED',
-        on: defaultListeners
+        responseType: 'stream',
+        transport: 'stream',
+        on: binaryStreamListeners
       }, {
         // streaming, binary
-        responseType: 'ms-stream',
-        transport: 'MS_STREAM',
-        on: defaultListeners
+        responseType: 'moz-chunked-arraybuffer',
+        transport: 'moz-chunked',
+        on: binaryStreamListeners
       }, {
-//        // e.g., Safari
+
+        // streaming, binary
+        responseType: 'ms-stream',
+        transport: 'ms-stream',
+        // NOTE: listeners specified later when we get options from user
+        on: {}
+      }, {
+//        // TODO should we enable this option or just use text for e.g., Safari?
+//        // Note that Safari will support fetch soon.
 //        // non-streaming, binary
 //        responseType: 'arraybuffer',
-//        toArrayBufferStream: function(options) {
-//        },
+//        'progress': function() {
+//          const xhr = this;
+//          const encoded = xhr.response.slice(index);
+//          index = xhr.response.length;
+//          return encoded;
+//        }
 //      }, {
-        // supporting IE9 and webkit
+        // streaming, non-binary
+        // For IE9 and webkit
         // See https://github.com/jonnyreeves/chunked-request/issues/13#issuecomment-239534227
         responseType: 'text',
-        transport: 'XHR',
+        transport: 'xhr',
         on: {
-          'readystatechange': function(readystate) {
+          'readystatechange': function() {
             const xhr = this;
-            // state 1 means OPENED
-            if (readystate === 1) {
-              console.log('opened');
+            if (!xhr.mimeTypeOverriden) {
               //XHR binary charset opt by Marcus Granado 2006
               //http://web.archive.org/web/20071103070418/http://mgran.blogspot.com/2006/08/downloading-binary-streams-with.html
               xhr.overrideMimeType('text/plain; charset=x-user-defined');
+              xhr.mimeTypeOverriden = true;
             }
           },
           'progress': function() {
             const xhr = this;
             const rawChunk = xhr.responseText.substr(index);
             index = xhr.responseText.length;
-            return encode(rawChunk);
+            const encoded = textEncoder.encode(rawChunk, {stream: true});
+            return encoded;
           }
         }
       }], function(candidate) {
+        // test inspired by https://github.com/unshiftio/requests/blob/master/browser.js
         const xhr = new XMLHttpRequest();
         xhr.open('get', '/', true);
         const candidateResponseType = candidate.responseType;
@@ -115,8 +132,17 @@ export default function defaultTransportFactory(root) {
         // can use this, which is fine as we force that by default.
         try {
           xhr.responseType = candidateResponseType;
-          return xhr.hasOwnProperty('response') && (xhr.responseType === candidateResponseType);
+          return (typeof xhr.response !== 'undefined' || typeof xhr.responseText !== 'undefined') && (xhr.responseType === candidateResponseType);
         } catch (e) {
+//          // TODO should we show this?
+//          // The testing for a compatible responseType may show warnings in the dev console
+//          // (at least Chrome does) when trying non-supported responseTypes.
+//          const message = [
+//            'Console warnings may be expected.',
+//            'Library "chunked-request" is trying to find a supported responseType.',
+//            'https://github.com/jonnyreeves/chunked-request'
+//          ].join(' ');
+//          console.log(message);
           return false;
         }
       });
@@ -127,52 +153,90 @@ export default function defaultTransportFactory(root) {
         responseType: responseType
       };
 
-
       const patchListeners = xhrPatches.on;
-      const listenersByEventName = union(keys(defaultListeners), keys(patchListeners))
-      .reduce(function(acc, key) {
-        const defaultListener = defaultListeners[key] || noop;
-        const patchListener = patchListeners[key] || noop;
-        acc[key] = flow(patchListener, defaultListener);
-        return acc;
-      }, {});
 
       selected = function(options) {
         if (!options) {
           throw new Error('No options specified');
         }
-        defaultsDeep(options, defaultOptions);
-        console.log('options');
-        console.log(options);
-        
-        listenersByEventName.progress = flow(listenersByEventName.progress || noop, options.onRawChunk);
 
-        listenersByEventName.loadend = flow(
-            listenersByEventName.loadend || noop,
-            function() {
+        let parserListeners;
+        if (responseType !== 'ms-stream') {
+          parserListeners = {
+            progress: options.onRawChunk,
+            loadend: function() {
               const xhr = this;
-              return {
+              options.onRawChunk(null, true);
+              return options.onRawComplete({
                 statusCode: xhr.status,
                 transport: transport,
                 raw: xhr
-              };
+              });
             },
-            options.onRawComplete
-        );
-
-        listenersByEventName.error = flow(
-            listenersByEventName.error || noop,
-            function(err) {
-              return {
+            error: function(err) {
+              return options.onRawComplete({
                 statusCode: 0,
                 transport: transport,
                 raw: err
-              };
-            },
-            options.onRawComplete
-        );
+              });
+            }
+          };
+        } else if (responseType === 'ms-stream') {
+          // TODO The following is a quick start at trying it out,
+          // but we need to research ms-stream and readAsArrayBuffer more:
+          // https://msdn.microsoft.com/en-us/library/hh772312(v=vs.85).aspx
+          // https://msdn.microsoft.com/en-us/library/hh772330(v=vs.85).aspx
+          // https://msdn.microsoft.com/en-us/library/hh772328(v=vs.85).aspx
+          parserListeners = {
+            readystatechange: function() {
+              const xhr = this;
+              if (xhr.readyState === 3 && xhr.status === 200 ) {
+                const msstream = xhr.response; // MSStream object
+                const stream = msstream.msDetachStream(); // IInputStreamObject
 
-        xhrRequest(options, listenersByEventName);
+                // from https://msdn.microsoft.com/en-us/library/hh772330(v=vs.85).aspx
+                const reader = new MSStreamReader();
+
+                // Set up callbacks to handle progress, success, and errors:
+                reader.onprogress = function(e) {
+                  // TODO I don't know whether this has the chunked result
+                  // because the example MS gave for getting the result
+                  // was only for the "onload" event
+                  options.onRawChunk(e.target.result)
+                };
+                reader.onload = function() {
+                  options.onRawChunk(null, true);
+                  return options.onRawComplete({
+                    statusCode: xhr.status,
+                    transport: transport,
+                    raw: xhr
+                  });
+                };
+                reader.onerror = function(err) {
+                  return options.onRawComplete({
+                    statusCode: 0,
+                    transport: transport,
+                    raw: err
+                  });
+                };
+
+                // Read file into memory:
+                reader.readAsArrayBuffer(stream);
+              }
+            }
+          };
+        }
+
+        const listenersByEventName = union(keys(patchListeners), keys(parserListeners))
+        .reduce(function(acc, key) {
+          const patchListener = patchListeners[key] || noop;
+          const parserListener = parserListeners[key] || noop;
+          acc[key] = flow(patchListener, parserListener);
+          return acc;
+        }, {});
+
+        defaultsDeep(options, defaultOptions);
+        xhrRequest(options, listenersByEventName, root);
       };
     }
   }

@@ -1,10 +1,41 @@
-//import ee from 'event-emitter';
-import toPairs from 'lodash';
+import toPairs from 'lodash/topairs';
 
-export default function xhrRequest(options, listenersByEventName) {
-  //const emitter = new ee();
+/**
+ * Completely destroy the running XHR and release of the internal references.
+ * from https://github.com/unshiftio/requests/blob/master/browser.js
+ *
+ * @returns {Boolean} Successful destruction
+ * @api public
+ */
+function destroy(xhr) {
+  if (!xhr.socket) {
+    return false;
+  }
+
+  xhr.socket.abort();
+  xhr.removeAllListeners();
+
+  xhr.headers = {};
+  xhr.socket = null;
+  xhr.body = null;
+
+  return true;
+}
+
+export default function xhrRequest(options, listenersByEventName, root) {
 
   const xhr = new XMLHttpRequest();
+
+  // IE has a bug which causes IE10 to freeze when close WebPage during an XHR
+  // request: https://support.microsoft.com/kb/2856746
+  //
+  // The solution is to completely clean up all active running requests.
+  // from https://github.com/unshiftio/requests/blob/master/browser.js
+  if (root.attachEvent) {
+    root.attachEvent('onunload', function() {
+      destroy(xhr);
+    });
+  }
 
   xhr.open(options.method, options.url);
   xhr.responseType = options.responseType;
