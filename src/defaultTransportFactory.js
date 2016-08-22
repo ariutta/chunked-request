@@ -56,8 +56,9 @@ if (typeof TextEncoder !== 'undefined') {
  */
 export default function defaultTransportFactory(root) {
   if (!selected) {
-    if (typeof root.fetch === 'function') {
-      // browser supports fetch, so use it
+    if (typeof root.fetch === 'function' && typeof root.ReadableStream === 'function') {
+      // browser supports ReadableStream and fetch, so use native fetch
+      // TODO should we run a try/catch to make sure we do get back a WHATWG stream?
       selected = fetchRequest;
     } else {
       // use XMLHttpRequest (XHR)
