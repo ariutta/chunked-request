@@ -1,6 +1,6 @@
 const entryDelimiters = ['\r\n', '\n'];
 
-// The defaultChunkParser expects the response from the server to consist of new-line
+// The defaultParser expects the response from the server to consist of new-line
 // delimited JSON, eg:
 //
 //  { "chunk": "#1", "data": "Hello" }\n
@@ -8,37 +8,50 @@ const entryDelimiters = ['\r\n', '\n'];
 //
 // It will correctly handle the case where a chunk is emitted by the server across
 // delimiter boundaries.
-export default function defaultChunkParser(bytes, state = {}, flush = false) {
-  if (!state.textDecoder) {
-    state.textDecoder = new TextDecoder();
+export default function defaultParser(reader, onChunk, onError, onComplete) {
+  const textDecoder = new TextDecoder();
+  let trailer;
+
+  function defaultChunkParser({ value, done }) {
+    const chunkStr = value ? textDecoder.decode(value, {stream: !done}) : '';
+
+    const jsonLiterals = entryDelimiters.reduce(function(acc, entryDelimiter) {
+      return acc.reduce(function(subacc, x) {
+        return subacc.concat(x.split(entryDelimiter));
+      }, []);
+    }, [chunkStr]);
+
+    if (trailer) {
+      jsonLiterals[0] = `${trailer}${jsonLiterals[0]}`;
+    }
+
+    // Is this a complete message?  If not, push the trailing (incomplete) string 
+    // into the trailer. 
+    if (!done && !hasSuffix(chunkStr, entryDelimiters)) {
+      trailer = jsonLiterals.pop();
+    } else {
+      trailer = null;
+    }
+
+    return jsonLiterals
+      .filter(v => v.trim() !== '')
+      .map(v => JSON.parse(v));
   }
-  const textDecoder = state.textDecoder;
 
-  const chunkStr = bytes ? textDecoder.decode(bytes, {stream: !flush}) : '';
-
-  const jsonLiterals = entryDelimiters.reduce(function(acc, entryDelimiter) {
-    return acc.reduce(function(subacc, x) {
-      return subacc.concat(x.split(entryDelimiter));
-    }, []);
-  }, [chunkStr]);
-
-  if (state.trailer) {
-    jsonLiterals[0] = `${state.trailer}${jsonLiterals[0]}`;
+  function pump(reader) {
+    return reader.read()
+      .then(result => {
+        const parsedChunk = defaultChunkParser(result);
+        if (typeof parsedChunk !== 'undefined') {
+          onChunk(parsedChunk);
+        }
+        if (result.done) {
+          return onComplete();
+        }
+        return pump(reader);
+      });
   }
-
-  // Is this a complete message?  If not, push the trailing (incomplete) string 
-  // into the state. 
-  if (!flush && !hasSuffix(chunkStr, entryDelimiters)) {
-    state.trailer = jsonLiterals.pop();
-  } else {
-    state.trailer = null;
-  }
-
-  const jsonObjects = jsonLiterals
-    .filter(v => v.trim() !== '')
-    .map(v => JSON.parse(v));
-
-  return [ jsonObjects, state ];
+  return pump(reader);
 }
 
 function hasSuffix(s, suffixes) {

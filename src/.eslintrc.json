@@ -3,6 +3,7 @@
     "browser": true
   },
   "globals": {
+    "Promise": false
     "Uint8Array": false
   },
   "rules": {

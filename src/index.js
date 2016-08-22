@@ -1,9 +1,9 @@
 import { isObject, noop } from './util';
 import defaultTransportFactory  from './defaultTransportFactory';
-import defaultChunkParser from './defaultChunkParser';
+import defaultParser from './defaultChunkParser';
 
 // chunkedRequest will make a network request to the URL specified in `options.url`
-// passing chunks of data extracted by the optional `options.chunkParser` to the
+// passing chunks of data extracted by the optional `options.parser` to the
 // optional `options.onChunk` callback.  When the request has completed the optional
 // `options.onComplete` callback will be invoked.
 export default function chunkedRequest(options) {
@@ -17,38 +17,8 @@ export default function chunkedRequest(options) {
     credentials = 'same-origin',
     onComplete = noop,
     onChunk = noop,
-    chunkParser = defaultChunkParser
+    parser = defaultParser
   } = options;
-
-  // parserState can be utilised by the chunkParser to hold on to state; the
-  // defaultChunkParser uses it to keep track of any trailing text the last
-  // delimiter in the chunk.  There is no contract for parserState.
-  let parserState;
-
-  function processRawChunk(chunkBytes, flush = false) {
-    let parsedChunks = null;
-    let parseError = null;
-
-    try {
-      [ parsedChunks, parserState ] = chunkParser(chunkBytes, parserState, flush);
-    } catch (e) {
-      parseError = e;
-      parseError.chunkBytes = chunkBytes;
-      parseError.parserState = parserState;
-    } finally {
-      if (parseError || (parsedChunks && parsedChunks.length > 0)) {
-        onChunk(parseError, parsedChunks);
-      }
-    }
-  }
-
-  function processRawComplete(rawComplete) {
-    if (parserState) {
-      // Flush the parser to process any remaining state.
-      processRawChunk(null, true);
-    }
-    onComplete(rawComplete);
-  }
 
   let transport = options.transport;
   if (!transport) {
@@ -60,10 +30,21 @@ export default function chunkedRequest(options) {
     headers,
     method,
     body,
-    credentials,
-    onRawChunk: processRawChunk,
-    onRawComplete: processRawComplete
-  });
+    credentials
+  })
+    .then(function(res) {
+      parser(
+          res.body.getReader(),
+          function(parsedChunk) {
+            onChunk(null, parsedChunk);
+          },
+          function(err) {
+            onChunk(err);
+          },
+          onComplete
+      );
+    })
+    .catch(onComplete);
 }
 
 // override this function to delegate to an alternative transport function selection
@@ -78,5 +59,5 @@ function validateOptions(o) {
   // Optional.
   if (o.onComplete && typeof o.onComplete !== 'function') throw new Error('Invalid options.onComplete value');
   if (o.onChunk && typeof o.onChunk !== 'function') throw new Error('Invalid options.onChunk value');
-  if (o.chunkParser && typeof o.chunkParser !== 'function') throw new Error('Invalid options.chunkParser value');
+  if (o.parser && typeof o.parser !== 'function') throw new Error('Invalid options.parser value');
 }
